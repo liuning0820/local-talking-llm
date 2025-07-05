@@ -77,10 +77,15 @@ ollama pull gemma3  # or any other model you prefer
 ### Usage
 
 #### Basic Usage
+
 ```bash
-python app.py
-# in China
-HF_ENDPOINT=https://hf-mirror.com python app.py
+# MacOS/Linux
+python app_mac.py
+# Specifically In China
+HF_ENDPOINT=https://hf-mirror.com python app_mac.py
+
+# Windows
+python app_win.py
 
 ```
 
