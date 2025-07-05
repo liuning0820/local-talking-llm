@@ -29,11 +29,12 @@ parser.add_argument("--exaggeration", type=float, default=0.5, help="Emotion exa
 parser.add_argument("--cfg-weight", type=float, default=0.5, help="CFG weight for pacing (0.0-1.0)")
 parser.add_argument("--model", type=str, default=OLLAMA_LLM_MODEL, help="Ollama model to use")
 parser.add_argument("--save-voice", action="store_true", help="Save generated voice samples")
+parser.add_argument("--play-voice", action="store_true", help="Play generated voice samples")
 parser.add_argument("--continuous", action="store_true", help="Enable continuous listening mode with wake word")
 parser.add_argument("--wake-word", type=str, default="你好", help="Wake word to activate listening")
 parser.add_argument("--listen-duration", type=float, default=3.0, help="Duration to listen for wake word (seconds)")
 parser.add_argument("--wake-timeout", type=float, default=60.0, help="Time to stay awake after wake word detection (seconds)")
-parser.add_argument("--whisper-model", type=str, default="small", help="Whisper model to use (tiny, base, small, medium, large, base.en, small.en)")
+parser.add_argument("--whisper-model", type=str, default="tiny", help="Whisper model to use (tiny, base, small, medium, large, base.en, small.en)")
 parser.add_argument("--language", type=str, default="zh", help="Voice Language(e.g., en, zh)")
 args = parser.parse_args()
 
@@ -480,8 +481,9 @@ if __name__ == "__main__":
                                     tts.save_voice_sample(response, filename, args.voice)
                                 console.print(f"[dim]Voice saved to: {filename}[/dim]")
 
-                            play_audio(sample_rate, audio_array)
-                            
+                            if args.play_voice:
+                                play_audio(sample_rate, audio_array)
+
                             # Continue in wake mode for more questions
                             console.print(f"[green]🎤 Still listening... ({args.wake_timeout}s window refreshed)[/green]")
                         else:
@@ -518,7 +520,7 @@ if __name__ == "__main__":
                 )
 
                 if audio_np.size > 0:
-                    with console.status("Transcribing...", spinner="dots"):
+                    with console.status("Transcribing your question...", spinner="dots"):
                         text = transcribe(audio_np)
                     if is_junk_transcription(text):
                         console.print("[dim]No clear speech detected, continuing to listen...[/dim]")
@@ -566,7 +568,8 @@ if __name__ == "__main__":
                             tts.save_voice_sample(response, filename, args.voice)
                         console.print(f"[dim]Voice saved to: {filename}[/dim]")
 
-                    play_audio(sample_rate, audio_array)
+                    if args.play_voice:
+                        play_audio(sample_rate, audio_array)
                 else:
                     console.print(
                         "[red]No audio recorded. Please ensure your microphone is working."
