@@ -13,7 +13,12 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_ollama import OllamaLLM
 from tts import TextToSpeechService
+from dotenv import load_dotenv
 
+# Load environment variables from .env
+load_dotenv()
+OLLAMA_LLM_MODEL = os.getenv("OLLAMA_LLM_MODEL", "gemma3:1b")
+OLLAMA_LLM_BASE_URL = os.getenv("OLLAMA_LLM_BASE_URL", "http://localhost:11434")
 console = Console()
 stt = whisper.load_model("base.en")
 
@@ -37,7 +42,7 @@ prompt_template = ChatPromptTemplate.from_messages([
 ])
 
 # Initialize LLM
-llm = OllamaLLM(model=args.model, base_url="http://localhost:11434")
+llm = OllamaLLM(model=args.model, base_url=OLLAMA_LLM_BASE_URL)
 
 # Create the chain with modern LCEL syntax
 chain = prompt_template | llm
@@ -244,7 +249,7 @@ if __name__ == "__main__":
 
                 with console.status("Generating response...", spinner="dots"):
                     response = get_llm_response(text)
-
+                    console.print(f"[cyan]Assistant: {response}")
                     # Analyze emotion and adjust exaggeration dynamically
                     dynamic_exaggeration = analyze_emotion(response)
 
@@ -258,7 +263,7 @@ if __name__ == "__main__":
                         cfg_weight=dynamic_cfg
                     )
 
-                console.print(f"[cyan]Assistant: {response}")
+
                 console.print(f"[dim](Emotion: {dynamic_exaggeration:.2f}, CFG: {dynamic_cfg:.2f})[/dim]")
 
                 # Save voice sample if requested
