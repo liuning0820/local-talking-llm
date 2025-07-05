@@ -66,7 +66,7 @@ cd local-talking-llm
 # Install dependencies
 pip install -r requirements.txt
 
-# Download NLTK data (for sentence tokenization)
+# Download NLTK data (for sentence tokenization) https://github.com/nltk/nltk_data/tree/gh-pages
 python -c "import nltk; nltk.download('punkt')"
 
 # Install and start Ollama
@@ -79,6 +79,9 @@ ollama pull gemma3  # or any other model you prefer
 #### Basic Usage
 ```bash
 python app.py
+# in China
+HF_ENDPOINT=https://hf-mirror.com python app.py
+
 ```
 
 #### With Voice Cloning

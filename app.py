@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser(description="Local Voice Assistant with Chatter
 parser.add_argument("--voice", type=str, help="Path to voice sample for cloning")
 parser.add_argument("--exaggeration", type=float, default=0.5, help="Emotion exaggeration (0.0-1.0)")
 parser.add_argument("--cfg-weight", type=float, default=0.5, help="CFG weight for pacing (0.0-1.0)")
-parser.add_argument("--model", type=str, default="gemma3", help="Ollama model to use")
+parser.add_argument("--model", type=str, default="gemma3:1b", help="Ollama model to use")
 parser.add_argument("--save-voice", action="store_true", help="Save generated voice samples")
 args = parser.parse_args()
 
@@ -62,6 +62,7 @@ chain_with_history = RunnableWithMessageHistory(
 def record_audio(stop_event, data_queue):
     """
     Captures audio data from the user's microphone and adds it to a queue for further processing.
+    Now includes device checks, error handling, and device selection if needed.
 
     Args:
         stop_event (threading.Event): An event that, when set, signals the function to stop recording.
@@ -70,16 +71,53 @@ def record_audio(stop_event, data_queue):
     Returns:
         None
     """
-    def callback(indata, frames, time, status):
-        if status:
-            console.print(status)
-        data_queue.put(bytes(indata))
+    import sounddevice as sd
+    from sounddevice import PortAudioError
 
-    with sd.RawInputStream(
-        samplerate=16000, dtype="int16", channels=1, callback=callback
-    ):
-        while not stop_event.is_set():
-            time.sleep(0.1)
+    # List available input devices
+    devices = sd.query_devices()
+    input_devices = [d for d in devices if d['max_input_channels'] > 0]
+    if not input_devices:
+        console.print("[red]No input devices (microphones) found. Please check your system settings.")
+        return
+    default_device = sd.default.device[0]
+    if default_device is None or default_device < 0:
+        console.print("[red]No default input device set. Please set a default microphone in your OS.")
+        # Prompt user to select a device
+        console.print("[yellow]Available audio input devices:")
+        for idx, dev in enumerate(devices):
+            if dev['max_input_channels'] > 0:
+                console.print(f"  [{idx}] {dev['name']} (inputs: {dev['max_input_channels']})")
+        try:
+            device_idx = int(console.input("Enter the device index to use for recording: "))
+            if device_idx < 0 or device_idx >= len(devices) or devices[device_idx]['max_input_channels'] == 0:
+                console.print("[red]Invalid device index selected.")
+                return
+            sd.default.device = (device_idx, sd.default.device[1])
+        except Exception as e:
+            console.print(f"[red]Error selecting device: {e}")
+            return
+    try:
+        def callback(indata, frames, time, status):
+            if status:
+                console.print(status)
+            data_queue.put(bytes(indata))
+
+        with sd.RawInputStream(
+            samplerate=16000, dtype="int16", channels=1, callback=callback
+        ):
+            while not stop_event.is_set():
+                time.sleep(0.1)
+    except PortAudioError as e:
+        console.print(f"[red]PortAudioError: {e}\nTry checking your microphone connection and permissions.")
+        # Optionally, print available devices for debugging
+        console.print("[yellow]Available audio devices:")
+        for idx, dev in enumerate(devices):
+            console.print(f"  [{idx}] {dev['name']} (inputs: {dev['max_input_channels']}, outputs: {dev['max_output_channels']})")
+        return
+    except Exception as e:
+        console.print(f"[red]Unexpected error: {e}")
+        return
 
 
 def transcribe(audio_np: np.ndarray) -> str:
