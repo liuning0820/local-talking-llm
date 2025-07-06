@@ -1,12 +1,13 @@
-## Build your own voice assistant and run it locally: Whisper + Ollama + ChatterBox
+## Build your own voice assistant and run it locally: Whisper + Ollama + ChatterBox/pyttsx3
 
 > Original article: https://blog.duy-huynh.com/build-your-own-voice-assistant-and-run-it-locally/
 >
+> > **Updated July 2025**: Now using [pyttsx3](https://github.com/nateshmbhat/pyttsx3), a text-to-speech conversion library in Python, Unlike alternative libraries, it works offline and support for multiple languages!
 > **Updated May 2025**: Now using [Chatterbox TTS](https://github.com/resemble-ai/chatterbox), a state-of-the-art open-source TTS model from Resemble AI!
 >
-> The original implementation using Bark has been preserved in the `archive-2025-05-29` branch for reference.
 
-After my latest post about how to build your own RAG and run it locally. Today, we're taking it a step further by not only implementing the conversational abilities of large language models but also adding listening and speaking capabilities. The idea is straightforward: we are going to create a voice assistant reminiscent of Jarvis or Friday from the iconic Iron Man movies, which can operate offline on your computer.
+
+The implementation not only focuses on the conversational abilities of large language models but also adds listening and speaking capabilities. The idea is straightforward: we are going to create a voice assistant reminiscent of Jarvis or Friday from the iconic Iron Man movies, which can operate offline on your computer.
 
 **New Features with ChatterBox:**
 - 🎯 **Voice Cloning**: Clone any voice with just a short audio sample
@@ -15,7 +16,7 @@ After my latest post about how to build your own RAG and run it locally. Today, 
 - 💧 **Watermarked Audio**: Built-in neural watermarking for authenticity
 
 ### Techstack
-First, you should set up a virtual Python environment. You have several options for this, including pyenv, virtualenv, poetry, and others that serve a similar purpose. Personally, I'll use Poetry for this tutorial due to my personal preferences. Here are several crucial libraries you'll need to install:
+First, you should set up a virtual Python environment. You have several options for this, including pyenv, virtualenv, poetry, uv and others that serve a similar purpose. Personally, I'll use uv for this tutorial due to my personal preferences. Here are several crucial libraries you'll need to install:
 
 - **rich**: For a visually appealing console output.
 - **openai-whisper**: A robust tool for speech-to-text conversion.
@@ -25,7 +26,7 @@ First, you should set up a virtual Python environment. You have several options 
 
 For a detailed list of dependencies, refer to the link here.
 
-The most critical component here is the Large Language Model (LLM) backend, for which we will use Ollama. Ollama is widely recognized as a popular tool for running and serving LLMs offline. If Ollama is new to you, I recommend checking out my previous article on offline RAG: "Build Your Own RAG and Run It Locally: Langchain + Ollama + Streamlit". Basically, you just need to download the Ollama application, pull your preferred model, and run it.
+The most critical component here is the Large Language Model (LLM) backend, for which we will use Ollama. Ollama is widely recognized as a popular tool for running and serving LLMs offline. 
 
 ### Architecture
 Okay, if everything has been set up, let's proceed to the next step. Below is the overall architecture of our application, which fundamentally comprises 3 main components:
@@ -42,7 +43,7 @@ flowchart TD
     B --> C[📝 Text Transcription]
     C --> D[Conversational Chain<br/>Langchain + Ollama<br/>Gemma3 / Llama-4 / Other LLMs]
     D --> E[🤖 Generated Response]
-    E --> F[Speech Synthesizer<br/>Chatterbox TTS]
+    E --> F[Speech Synthesizer<br/>Chatterbox TTS / pyttsx3]
     F --> G[🔊 Audio Output]
     G --> H[👤 User Hears Response]
 
@@ -60,18 +61,20 @@ flowchart TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/vndee/local-talking-llm.git
+git clone https://github.com/liuning0820/local-talking-llm.git
 cd local-talking-llm
 
 # Install dependencies
 pip install -r requirements.txt
+# or
+uv sync
 
 # Download NLTK data (for sentence tokenization) https://github.com/nltk/nltk_data/tree/gh-pages
 python -c "import nltk; nltk.download('punkt')"
 
 # Install and start Ollama
 # Follow instructions at https://ollama.ai
-ollama pull gemma3  # or any other model you prefer
+ollama pull gemma3:1b  # or any other model you prefer
 ```
 
 ### Usage
@@ -120,50 +123,12 @@ python app.py --save-voice
 - `--model`: Ollama model to use (default: llama2)
 - `--save-voice`: Save generated audio responses to `voices/` directory
 
-### Implementation Details
+- `--continuous`: Enable continuous listening mode
+- `--wake-word`: Set a custom wake word for continuous listening (default: "hello")
+- `--whisper-model`: Specify Whisper model to use (default: "base.en", options: "tiny", "base", "small", "medium", "large", "base.en", "small.en")
+- `--play-voice`: Play generated audio responses through speakers
+- `--record-voice`: Record audio responses to a file instead of playing them
 
-#### TextToSpeechService with ChatterBox
-The new TextToSpeechService leverages ChatterBox's advanced features:
-
-```python
-from chatterbox.tts import ChatterboxTTS
-
-class TextToSpeechService:
-    def __init__(self, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
-        self.device = device
-        self.model = ChatterboxTTS.from_pretrained(device=device)
-        self.sample_rate = self.model.sr
-
-    def synthesize(self, text: str, audio_prompt_path: str = None,
-                  exaggeration: float = 0.5, cfg_weight: float = 0.5):
-        wav = self.model.generate(
-            text,
-            audio_prompt_path=audio_prompt_path,
-            exaggeration=exaggeration,
-            cfg_weight=cfg_weight
-        )
-        return self.sample_rate, wav.squeeze().cpu().numpy()
-```
-
-Key improvements over the previous Bark implementation:
-- **Voice Cloning**: Pass an audio file to clone any voice
-- **Emotion Control**: Adjust expressiveness with the `exaggeration` parameter
-- **Better Quality**: ChatterBox produces more natural-sounding speech
-- **Faster Inference**: Smaller model size (0.5B vs Bark's larger models)
-
-#### Dynamic Emotion Analysis
-The app now includes automatic emotion detection to make responses more expressive:
-
-```python
-def analyze_emotion(text: str) -> float:
-    emotional_keywords = ['amazing', 'terrible', 'love', 'hate', 'excited',
-                         'sad', 'happy', 'angry', '!', '?!']
-    emotion_score = 0.5
-    for keyword in emotional_keywords:
-        if keyword in text.lower():
-            emotion_score += 0.1
-    return min(0.9, max(0.3, emotion_score))
-```
 
 ### Tips for Best Results
 
@@ -228,4 +193,3 @@ The combination of Whisper's robust speech recognition, Ollama's flexible LLM se
 - [Original Blog Post](https://blog.duy-huynh.com/build-your-own-voice-assistant-and-run-it-locally/)
 
 ---
-
