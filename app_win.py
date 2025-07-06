@@ -34,7 +34,7 @@ parser.add_argument("--continuous", action="store_true", help="Enable continuous
 parser.add_argument("--wake-word", type=str, default="你好", help="Wake word to activate listening")
 parser.add_argument("--listen-duration", type=float, default=3.0, help="Duration to listen for wake word (seconds)")
 parser.add_argument("--wake-timeout", type=float, default=60.0, help="Time to stay awake after wake word detection (seconds)")
-parser.add_argument("--whisper-model", type=str, default="base", help="Whisper model to use (tiny, base, small, medium, large, base.en, small.en)")
+parser.add_argument("--whisper-model", type=str, default="small", help="Whisper model to use (tiny, base, small, medium, large, base.en, small.en)")
 parser.add_argument("--language", type=str, default="zh", help="Voice Language(e.g., en, zh)")
 args = parser.parse_args()
 
@@ -47,9 +47,29 @@ tts = None
 if args.language != "zh":
     tts = TextToSpeechService()
 
-# Modern prompt template using ChatPromptTemplate
+# Enhanced prompt template for qwen2.5:32b model
 prompt_template = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful and friendly AI assistant. You are polite, respectful, and aim to provide concise responses of less than 20 words."),
+    ("system", """你是一个智能、博学且富有洞察力的AI助手。你具备以下特质：
+
+核心能力：
+- 拥有广泛的知识储备，能够提供准确、深入的回答
+- 善于分析问题的本质，提供有建设性的见解
+- 能够根据上下文调整回答的详细程度和风格
+
+回答原则：
+- 准确性优先：确保信息的准确性和可靠性
+- 适度详细：根据问题复杂度提供恰当详细的回答（通常30-80字）
+- 结构清晰：重要信息优先，逻辑清晰
+- 实用导向：提供可操作的建议和解决方案
+- 文化敏感：理解并尊重不同的文化背景
+
+交流风格：
+- 语言自然流畅，既专业又易懂
+- 保持友善和耐心的态度
+- 必要时主动询问澄清细节
+- 承认知识局限，不虚构信息
+
+请根据用户的具体需求，提供有价值的回答。"""),
     MessagesPlaceholder(variable_name="history"),
     ("human", "{input}")
 ])
@@ -62,6 +82,12 @@ chain = prompt_template | llm
 
 # Chat history storage
 chat_sessions = {}
+
+def reset_chat_sessions():
+    """Reset all chat sessions to clear conversation history."""
+    global chat_sessions
+    chat_sessions.clear()
+    console.print("[dim]Chat history cleared.[/dim]")
 
 def get_session_history(session_id: str) -> InMemoryChatMessageHistory:
     """Get or create chat history for a session."""
@@ -211,7 +237,6 @@ def analyze_emotion(text: str) -> float:
     return min(0.9, max(0.3, emotion_score))
 
 
-
 def continuous_listen_for_wake_word(wake_word: str, listen_duration: float = 3.0):
     """
     Continuously listens for wake word in short audio chunks.
@@ -244,7 +269,7 @@ def continuous_listen_for_wake_word(wake_word: str, listen_duration: float = 3.0
         return False
         
     audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-
+    
     if audio_np.size > 0:
         try:
             text = transcribe(audio_np)
@@ -374,6 +399,7 @@ def listen_in_wake_mode(wake_timeout: float = 60.0):
         console.print("[dim]Wake mode timeout - returning to wake word listening...[/dim]")
         stop_event.set()
         recording_thread.join()
+        reset_chat_sessions()  # Reset chat history on timeout
         return np.array([]), True
     
     except Exception as e:
@@ -545,7 +571,7 @@ if __name__ == "__main__":
                 )
 
                 if audio_np.size > 0:
-                    with console.status("Transcribing your question...", spinner="dots"):
+                    with console.status("Transcribing...", spinner="dots"):
                         text = transcribe(audio_np)
                     if is_junk_transcription(text):
                         console.print("[dim]No clear speech detected, continuing to listen...[/dim]")
