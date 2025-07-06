@@ -34,7 +34,7 @@ parser.add_argument("--continuous", action="store_true", help="Enable continuous
 parser.add_argument("--wake-word", type=str, default="你好", help="Wake word to activate listening")
 parser.add_argument("--listen-duration", type=float, default=3.0, help="Duration to listen for wake word (seconds)")
 parser.add_argument("--wake-timeout", type=float, default=60.0, help="Time to stay awake after wake word detection (seconds)")
-parser.add_argument("--whisper-model", type=str, default="tiny", help="Whisper model to use (tiny, base, small, medium, large, base.en, small.en)")
+parser.add_argument("--whisper-model", type=str, default="base", help="Whisper model to use (tiny, base, small, medium, large, base.en, small.en)")
 parser.add_argument("--language", type=str, default="zh", help="Voice Language(e.g., en, zh)")
 args = parser.parse_args()
 
@@ -551,7 +551,6 @@ if __name__ == "__main__":
                                 cfg_weight=dynamic_cfg
                             )
 
-                    console.print(f"[cyan]Assistant: {response}")
                     console.print(f"[dim](Emotion: {dynamic_exaggeration:.2f}, CFG: {dynamic_cfg:.2f})[/dim]")
 
                     # Save voice sample if requested

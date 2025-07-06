@@ -86,6 +86,7 @@ HF_ENDPOINT=https://hf-mirror.com python app_mac.py
 
 # Windows
 python app_win.py
+python app_win.py --play-voice --continuous --wake-word "你好"
 
 ```
 
