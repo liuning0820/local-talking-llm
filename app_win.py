@@ -211,6 +211,7 @@ def analyze_emotion(text: str) -> float:
     return min(0.9, max(0.3, emotion_score))
 
 
+
 def continuous_listen_for_wake_word(wake_word: str, listen_duration: float = 3.0):
     """
     Continuously listens for wake word in short audio chunks.
@@ -243,7 +244,7 @@ def continuous_listen_for_wake_word(wake_word: str, listen_duration: float = 3.0
         return False
         
     audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-    
+
     if audio_np.size > 0:
         try:
             text = transcribe(audio_np)
@@ -334,28 +335,52 @@ def listen_in_wake_mode(wake_timeout: float = 60.0):
     """
     console.print(f"[green]🎤 Wake mode active for {wake_timeout}s - just speak your question![/green]")
     start_time = time.time()
-    while (time.time() - start_time) < wake_timeout:
-        data_queue = Queue()
-        stop_event = threading.Event()
-        recording_thread = threading.Thread(target=record_audio, args=(stop_event, data_queue))
-        recording_thread.start()
-        time.sleep(2.0)
+    
+    data_queue = Queue()
+    stop_event = threading.Event()
+    recording_thread = threading.Thread(target=record_audio, args=(stop_event, data_queue))
+    recording_thread.start()
+
+    last_printed_second = None  # 新增变量，记录上次打印的整秒数
+    try:
+        while (time.time() - start_time) < wake_timeout:
+            # 检查是否接收到足够大的音频信号
+            if not data_queue.empty():
+                audio_np = collect_audio_from_queue(data_queue)
+                # 增加安全检查
+                if audio_np is None:
+                    console.print("[red dim]⚠️ No audio data collected from queue.[/red dim]")
+                    continue  # 继续下一轮监听循环
+                if audio_np.size > 0 and np.max(np.abs(audio_np)) > 0.01:
+                    console.print("[green]Speech detected! Recording full question...[/green]")
+                    full_audio = record_until_silence(max_duration=10.0, silence_threshold=2.0)
+                    if full_audio.size > 0:
+                        combined_audio = np.concatenate([audio_np, full_audio])
+                    else:
+                        combined_audio = audio_np
+                    stop_event.set()  # 停止录音线程
+                    recording_thread.join()
+                    return combined_audio, False
+            
+            remaining_time = wake_timeout - (time.time() - start_time)
+            current_second = int(remaining_time)
+            if remaining_time > 0 and current_second % 10 == 0 and current_second != last_printed_second:
+                console.print(f"[dim]Wake mode: {current_second}s remaining...[/dim]")
+                last_printed_second = current_second # 更新已打印的秒数
+
+            time.sleep(0.5)  # 避免 CPU 占用过高
+
+        # 超时处理
+        console.print("[dim]Wake mode timeout - returning to wake word listening...[/dim]")
         stop_event.set()
         recording_thread.join()
-        audio_np = collect_audio_from_queue(data_queue)
-        if audio_np.size > 0 and np.max(np.abs(audio_np)) > 0.01:
-            console.print("[green]Speech detected! Recording full question...[/green]")
-            full_audio = record_until_silence(max_duration=10.0, silence_threshold=2.0)
-            if full_audio.size > 0:
-                combined_audio = np.concatenate([audio_np, full_audio])
-                return combined_audio, False
-            else:
-                return audio_np, False
-        remaining_time = wake_timeout - (time.time() - start_time)
-        if remaining_time > 0 and int(remaining_time) % 10 == 0:
-            console.print(f"[dim]Wake mode: {int(remaining_time)}s remaining...[/dim]")
-    console.print("[dim]Wake mode timeout - returning to wake word listening...[/dim]")
-    return np.array([]), True
+        return np.array([]), True
+    
+    except Exception as e:
+        console.print(f"[red]Error during wake mode: {e}[/red]")
+        stop_event.set()
+        recording_thread.join()
+        return np.array([]), True
 
 
 active_threads = []
