@@ -11,15 +11,15 @@ from rich.console import Console
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_ollama import OllamaLLM
+from langchain_openai import ChatOpenAI
 from tts import TextToSpeechService
 from dotenv import load_dotenv
 import re
 
 # Load environment variables from .env
 load_dotenv()
-OLLAMA_LLM_MODEL = os.getenv("OLLAMA_LLM_MODEL", "gemma3:1b")
-OLLAMA_LLM_BASE_URL = os.getenv("OLLAMA_LLM_BASE_URL", "http://localhost:11434")
+LLAMA_SERVER_MODEL = os.getenv("LLAMA_SERVER_MODEL", "DeepSeek-R1-Distill-Qwen-1.5B")
+LLAMA_SERVER_BASE_URL = os.getenv("LLAMA_SERVER_BASE_URL", "http://localhost:8080/v1")
 console = Console()
 
 # Parse command line arguments
@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser(description="Local Voice Assistant with TTS")
 parser.add_argument("--voice", type=str, help="Path to voice sample for cloning")
 parser.add_argument("--exaggeration", type=float, default=0.5, help="Emotion exaggeration (0.0-1.0)")
 parser.add_argument("--cfg-weight", type=float, default=0.5, help="CFG weight for pacing (0.0-1.0)")
-parser.add_argument("--model", type=str, default=OLLAMA_LLM_MODEL, help="Ollama model to use")
+parser.add_argument("--model", type=str, default=LLAMA_SERVER_MODEL, help="Model name for llama-server")
 parser.add_argument("--save-voice", action="store_true", help="Save generated voice samples")
 parser.add_argument("--play-voice", action="store_true", help="Play generated voice samples")
 parser.add_argument("--continuous", action="store_true", help="Enable continuous listening mode with wake word")
@@ -75,7 +75,7 @@ prompt_template = ChatPromptTemplate.from_messages([
 ])
 
 # Initialize LLM
-llm = OllamaLLM(model=args.model, base_url=OLLAMA_LLM_BASE_URL)
+llm = ChatOpenAI(model=args.model, base_url=LLAMA_SERVER_BASE_URL, api_key="sk-no-key-required")
 
 # Create the chain with modern LCEL syntax
 chain = prompt_template | llm
@@ -264,11 +264,11 @@ def continuous_listen_for_wake_word(wake_word: str, listen_duration: float = 3.0
     recording_thread.join()
     
     # Process the audio
+
     audio_data = b"".join(list(data_queue.queue))
-    if not audio_data:
-        return False
-        
-    audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+    audio_np = (
+        np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+    )
     
     if audio_np.size > 0:
         try:
@@ -445,7 +445,7 @@ if __name__ == "__main__":
 
     console.print(f"[blue]Emotion exaggeration: {args.exaggeration}")
     console.print(f"[blue]CFG weight: {args.cfg_weight}")
-    console.print(f"[blue]LLM model: {args.model}")
+    console.print(f"[blue]LLM model: {args.model} (llama-server: {LLAMA_SERVER_BASE_URL})")
     
     if args.continuous:
         console.print(f"[green]Mode: Continuous listening with wake word")

@@ -75,6 +75,9 @@ python -c "import nltk; nltk.download('punkt')"
 # Install and start Ollama
 # Follow instructions at https://ollama.ai
 ollama pull gemma3:1b  # or any other model you prefer
+
+# llama-cli --model .\DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf
+# llama-server -m .\DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf -c 4096 --port 8080
 ```
 
 ### Usage

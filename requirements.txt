@@ -12,7 +12,6 @@ astunparse==1.6.3
 async-timeout==5.0.1
 attrs==22.2.0
 backoff==2.2.1
-basicsr==1.4.2
 beautifulsoup4==4.12.3
 black==23.3.0
 cachetools==5.4.0
