@@ -1,7 +1,6 @@
 import time
 import threading
 import numpy as np
-import whisper
 import sounddevice as sd
 import argparse
 import os
@@ -13,12 +12,16 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
+from stt import transcribe_llama_asr, transcribe_whisper
 import re
 
 # Load environment variables from .env
 load_dotenv()
 LLAMA_SERVER_MODEL = os.getenv("LLAMA_SERVER_MODEL", "DeepSeek-R1-Distill-Qwen-1.5B")
 LLAMA_SERVER_BASE_URL = os.getenv("LLAMA_SERVER_BASE_URL", "http://localhost:8080/v1")
+LLAMA_ASR_BASE_URL = os.getenv("LLAMA_ASR_BASE_URL", LLAMA_SERVER_BASE_URL)
+LLAMA_ASR_MODEL = os.getenv("LLAMA_ASR_MODEL", "Qwen3-ASR-0.6B-Q8_0.gguf")
+STT_BACKEND = os.getenv("STT_BACKEND", "whisper")
 console = Console()
 
 # Parse command line arguments
@@ -33,13 +36,20 @@ parser.add_argument("--continuous", action="store_true", help="Enable continuous
 parser.add_argument("--wake-word", type=str, default="你好", help="Wake word to activate listening")
 parser.add_argument("--listen-duration", type=float, default=3.0, help="Duration to listen for wake word (seconds)")
 parser.add_argument("--wake-timeout", type=float, default=60.0, help="Time to stay awake after wake word detection (seconds)")
+parser.add_argument("--stt-backend", type=str, default=STT_BACKEND, choices=["whisper", "llama-asr"],
+                    help="Speech-to-text backend: whisper (local) or llama-asr (llama-server API)")
 parser.add_argument("--whisper-model", type=str, default="small", help="Whisper model to use (tiny, base, small, medium, large, base.en, small.en)")
+parser.add_argument("--asr-model", type=str, default=LLAMA_ASR_MODEL, help="ASR model name on llama-server (e.g. Qwen3-ASR-0.6B-Q8_0.gguf)")
+parser.add_argument("--asr-base-url", type=str, default=LLAMA_ASR_BASE_URL, help="llama-server base URL for ASR (/v1/audio/transcriptions)")
 parser.add_argument("--language", type=str, default="zh", help="Voice Language(e.g., en, zh)")
 args = parser.parse_args()
 
 
-# Initialize Whisper with selected model
-stt = whisper.load_model(args.whisper_model)
+# Initialize STT backend
+stt = None
+if args.stt_backend == "whisper":
+    import whisper
+    stt = whisper.load_model(args.whisper_model)
 
 # Initialize TTS with ChatterBox only if not using zh (Chinese)
 tts = None
@@ -166,7 +176,7 @@ def record_audio(stop_event, data_queue):
 
 def transcribe(audio_np: np.ndarray) -> str:
     """
-    Transcribes the given audio data using the Whisper speech recognition model.
+    Transcribes the given audio data using the configured STT backend.
 
     Args:
         audio_np (numpy.ndarray): The audio data to be transcribed.
@@ -174,9 +184,14 @@ def transcribe(audio_np: np.ndarray) -> str:
     Returns:
         str: The transcribed text.
     """
-    result = stt.transcribe(audio_np, fp16=False)
-    text = result["text"].strip()
-    return text
+    if args.stt_backend == "llama-asr":
+        return transcribe_llama_asr(
+            audio_np,
+            base_url=args.asr_base_url,
+            model=args.asr_model,
+            language=args.language,
+        )
+    return transcribe_whisper(stt, audio_np)
 
 
 def get_llm_response(text: str) -> str:
@@ -445,6 +460,10 @@ if __name__ == "__main__":
     console.print(f"[blue]Emotion exaggeration: {args.exaggeration}")
     console.print(f"[blue]CFG weight: {args.cfg_weight}")
     console.print(f"[blue]LLM model: {args.model} (llama-server: {LLAMA_SERVER_BASE_URL})")
+    if args.stt_backend == "llama-asr":
+        console.print(f"[blue]STT backend: llama-asr ({args.asr_model} @ {args.asr_base_url})")
+    else:
+        console.print(f"[blue]STT backend: whisper ({args.whisper_model})")
     
     if args.continuous:
         console.print(f"[green]Mode: Continuous listening with wake word")
