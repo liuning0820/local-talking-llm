@@ -15,13 +15,22 @@ response = client.chat.completions.create(
     ],
     stream=True
 )
-done_reasoning = False
+started_reasoning = False
+started_answer = False
 for chunk in response:
     if chunk.choices and chunk.choices[0].delta:
         delta = chunk.choices[0].delta
+
+        reasoning_chunk = getattr(delta, 'reasoning_content', None)
+        if reasoning_chunk:
+            if not started_reasoning:
+                print('\n\n === Reasoning ===\n')
+                started_reasoning = True
+            print(reasoning_chunk, end='', flush=True)
+
         answer_chunk = delta.content
-        if answer_chunk != '':
-            if not done_reasoning:
+        if answer_chunk:
+            if not started_answer:
                 print('\n\n === Final Answer ===\n')
-                done_reasoning = True
+                started_answer = True
             print(answer_chunk, end='', flush=True)

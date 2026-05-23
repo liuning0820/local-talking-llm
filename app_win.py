@@ -12,7 +12,6 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_openai import ChatOpenAI
-from tts import TextToSpeechService
 from dotenv import load_dotenv
 import re
 
@@ -45,6 +44,7 @@ stt = whisper.load_model(args.whisper_model)
 # Initialize TTS with ChatterBox only if not using zh (Chinese)
 tts = None
 if args.language != "zh":
+    from tts import TextToSpeechService
     tts = TextToSpeechService()
 
 # Enhanced prompt template for qwen2.5:32b model
@@ -198,9 +198,8 @@ def get_llm_response(text: str) -> str:
         config={"session_id": session_id}
     )
 
-    # The response is now a string from the LLM, no need to remove "Assistant:" prefix
-    # since we're using a proper chat model setup
-    return response.strip()
+    content = response.content if hasattr(response, "content") else str(response)
+    return content.strip()
 
 
 def play_audio(sample_rate, audio_array):
