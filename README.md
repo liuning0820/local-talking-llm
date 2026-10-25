@@ -1,198 +1,133 @@
-## Build your own voice assistant and run it locally: Whisper + Ollama + ChatterBox/pyttsx3
+# local-talking-llm
 
-> Original article: https://blog.duy-huynh.com/build-your-own-voice-assistant-and-run-it-locally/
->
-> > **Updated July 2025**: Now using [pyttsx3](https://github.com/nateshmbhat/pyttsx3), a text-to-speech conversion library in Python, Unlike alternative libraries, it works offline and support for multiple languages!
-> **Updated May 2025**: Now using [Chatterbox TTS](https://github.com/resemble-ai/chatterbox), a state-of-the-art open-source TTS model from Resemble AI!
->
+This repository contains a local voice assistant and a separate local meeting
+MVP. The meeting workflow records device audio into bounded WAV chunks, performs
+per-chunk transcription, creates evidence-linked minutes, and keeps history in
+SQLite. It does not add a bot to a meeting or upload audio by default.
 
+The meeting worker persists each transcription and summary job before it starts
+processing. If the recording process exits after audio is written, run `retry`
+after restarting the CLI; closed chunks are recovered and already successful
+chunks are not processed twice.
 
-The implementation not only focuses on the conversational abilities of large language models but also adds listening and speaking capabilities. The idea is straightforward: we are going to create a voice assistant reminiscent of Jarvis or Friday from the iconic Iron Man movies, which can operate offline on your computer.
+## Meeting MVP
 
-**New Features with ChatterBox:**
-- 🎯 **Voice Cloning**: Clone any voice with just a short audio sample
-- 🎭 **Emotion Control**: Adjust emotional expressiveness of responses
-- 🚀 **Better Performance**: 0.5B parameter model with faster inference
-- 💧 **Watermarked Audio**: Built-in neural watermarking for authenticity
-
-### Techstack
-First, you should set up a virtual Python environment. You have several options for this, including pyenv, virtualenv, poetry, uv and others that serve a similar purpose. Personally, I'll use uv for this tutorial due to my personal preferences. Here are several crucial libraries you'll need to install:
-
-- **rich**: For a visually appealing console output.
-- **openai-whisper**: A robust tool for speech-to-text conversion.
-- **chatterbox-tts**: State-of-the-art text-to-speech synthesis with voice cloning and emotion control.
-- **langchain**: A straightforward library for interfacing with Large Language Models (LLMs).
-- **sounddevice**, **pyaudio**, and **speechrecognition**: Essential for audio recording and playback.
-
-For a detailed list of dependencies, refer to the link here.
-
-The most critical component here is the Large Language Model (LLM) backend, for which we will use Ollama. Ollama is widely recognized as a popular tool for running and serving LLMs offline. 
-
-### Architecture
-Okay, if everything has been set up, let's proceed to the next step. Below is the overall architecture of our application, which fundamentally comprises 3 main components:
-
-- **Speech Recognition**: Utilizing OpenAI's Whisper, we convert spoken language into text. Whisper's training on diverse datasets ensures its proficiency across various languages and dialects.
-- **Conversational Chain**: For the conversational capabilities, we'll employ the Langchain interface for the Llama-2 model (or any other model), which is served using Ollama. This setup promises a seamless and engaging conversational flow.
-- **Speech Synthesizer**: The transformation of text to speech is achieved through Chatterbox TTS, a state-of-the-art model from Resemble AI, renowned for its lifelike speech production and voice cloning capabilities.
-
-The workflow is straightforward: record speech, transcribe to text, generate a response using an LLM, and vocalize the response using ChatterBox.
-
-```mermaid
-flowchart TD
-    A[🎤 User Speech Input] --> B[Speech Recognition<br/>OpenAI Whisper]
-    B --> C[📝 Text Transcription]
-    C --> D[Conversational Chain<br/>Langchain + Ollama<br/>Gemma3 / Llama-4 / Other LLMs]
-    D --> E[🤖 Generated Response]
-    E --> F[Speech Synthesizer<br/>Chatterbox TTS / pyttsx3]
-    F --> G[🔊 Audio Output]
-    G --> H[👤 User Hears Response]
-
-    style A fill:#e1f5fe
-    style B fill:#f3e5f5
-    style C fill:#e8f5e8
-    style D fill:#fff3e0
-    style E fill:#e8f5e8
-    style F fill:#f3e5f5
-    style G fill:#e1f5fe
-    style H fill:#fce4ec
-```
-
-### Installation
+Use the new CLI when you need meeting recording and minutes. The CLI does not
+import the legacy TTS or chat paths unless you run those legacy entry points.
 
 ```bash
-# Clone the repository
-git clone https://github.com/liuning0820/local-talking-llm.git
-cd local-talking-llm
+python -m meeting_mvp --help
+python -m meeting_mvp devices --source all
+python -m meeting_mvp start --source microphone --device-id 2 --title "Weekly planning"
+# In another terminal, request a clean stop with the printed meeting ID.
+python -m meeting_mvp stop MEETING_ID
+python -m meeting_mvp list
+python -m meeting_mvp show MEETING_ID --transcript
+python -m meeting_mvp retry MEETING_ID
+python -m meeting_mvp export MEETING_ID --format markdown
+```
 
-# Install dependencies
-pip install -r requirements.txt
-# or
+Run a hardware-, model-, and network-free check with the following command:
+
+```bash
+python -m meeting_mvp self-check --synthetic
+```
+
+Read [the meeting MVP guide](docs/meeting-mvp.md) before recording. It explains
+installation, permissions, device selection, loopback limits, model settings,
+data deletion, and known platform boundaries.
+
+## Installation
+
+The project requires Python 3.11 or newer. For the current locked legacy
+PyTorch/torchaudio set, Python 3.11 through 3.13 is the tested installation
+range; CPython 3.14 currently cannot install `torchaudio==2.6.0`. If `.venv`
+does not exist, create it with Python's built-in `venv` module:
+
+```bash
+python -m venv .venv
+```
+
+Activate the environment before running project commands:
+
+```powershell
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+```
+
+```bash
+# macOS or Linux
+source .venv/bin/activate
+```
+
+If `uv` is installed, synchronize dependencies from `pyproject.toml` and the
+committed `uv.lock` file:
+
+```bash
 uv sync
-
-# Download NLTK data (for sentence tokenization) https://github.com/nltk/nltk_data/tree/gh-pages
-python -c "import nltk; nltk.download('punkt')"
-
-# Install and start Ollama
-# Follow instructions at https://ollama.ai
-ollama pull gemma3:1b  # or any other model you prefer
-
-# llama-cli --model .\DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf
-# llama-server -m .\DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf -c 4096 --port 8080
 ```
 
-### Usage
+`uv sync` creates or reuses the project `.venv` and installs the locked
+runtime dependencies. It also works with a `.venv` created by Python's
+built-in `venv` command.
 
-#### Basic Usage
+If `uv` is not installed, install the compatibility requirements instead:
 
 ```bash
-# MacOS/Linux
+python -m pip install -r requirements.txt
+```
+
+`requirements.txt` is a pinned compatibility requirements file for
+installations that do not use `uv`; it is not a second dependency source when
+using `uv sync`. Do not regenerate it with an unrestricted environment freeze,
+because that can add unrelated packages. Update it deliberately when a direct
+dependency changes.
+`SoundCard==0.4.5` is used only for Windows WASAPI loopback discovery and
+capture; microphone capture uses `sounddevice`. `openai-whisper` is the declared
+local Whisper dependency. Install that package; its Python import name is
+`whisper`. Do not install the unrelated PyPI package named `whisper`. Whisper
+and Ollama remain optional at runtime for history and synthetic checks, but a
+real recording needs an installed and configured ASR and LLM backend. If your
+interpreter is CPython 3.14, use a Python 3.11–3.13 virtual environment for the
+pinned `torch`/`torchaudio` set. If you cannot use that environment, configure
+the already supported OpenAI-compatible `llama-asr` backend instead of
+claiming that Whisper is installed.
+
+## Legacy voice assistant
+
+The original short-turn assistant remains available for compatibility. It is
+not part of the meeting pipeline and still loads Whisper, LangChain, and TTS at
+startup:
+
+```bash
 python app_mac.py
-# Specifically In China
-HF_ENDPOINT=https://hf-mirror.com python app_mac.py
-
-# Windows
 python app_win.py
-python app_win.py --play-voice --continuous --wake-word "你好"
-
 ```
 
-#### With Voice Cloning
-Record a 10-30 second audio sample of the voice you want to clone, then:
-```bash
-python app.py --voice path/to/voice_sample.wav
-```
+The old scripts use their existing `.env` settings and can record microphone
+input for conversational replies. They do not provide meeting history or
+bounded long-recording storage.
 
-#### With Custom Settings
-```bash
-# Adjust emotion and pacing
-python app.py --exaggeration 0.7 --cfg-weight 0.3
+## Project layout
 
-# Use a different LLM model
-python app.py --model codellama
+The `meeting_mvp/` package owns meeting configuration, SQLite persistence,
+chunked audio, device adapters, transcription, evidence validation, summaries,
+exports, and the CLI. The existing `app_mac.py`, `app_win.py`, `stt.py`,
+`tts.py`, and `query_local_llm.py` remain legacy paths.
 
-# Save generated voice samples
-python app.py --save-voice
-```
+## Privacy defaults
 
-### Configuration Options
+The default data directory is `%LOCALAPPDATA%\\local-talking-llm` on Windows,
+`~/Library/Application Support/local-talking-llm` on macOS, and
+`~/.local/share/local-talking-llm` on other systems. Set `MEETING_DATA_DIR` to
+choose another directory. Audio, transcripts, and summaries stay there, and
+remote model URLs are rejected while `MEETING_ALLOW_NETWORK=false`. The
+meeting MVP defaults to local Ollama at `http://127.0.0.1:11434` and uses its
+native `/api/chat` endpoint; use `MEETING_LLM_BACKEND=openai` only for an
+OpenAI-compatible `/v1/chat/completions` server. A remote upload requires
+both `MEETING_ALLOW_NETWORK=true` and an explicit `YES` confirmation.
 
-- `--voice`: Path to audio file for voice cloning
-- `--exaggeration`: Emotion intensity (0.0-1.0, default: 0.5)
-  - Lower values (0.3-0.4): Calmer, more neutral delivery
-  - Higher values (0.7-0.9): More expressive and emotional
-- `--cfg-weight`: Controls pacing and delivery style (0.0-1.0, default: 0.5)
-  - Lower values: Faster, more dynamic speech
-  - Higher values: Slower, more deliberate speech
-- `--model`: Ollama model to use (default: llama2)
-- `--save-voice`: Save generated audio responses to `voices/` directory
-
-- `--continuous`: Enable continuous listening mode
-- `--wake-word`: Set a custom wake word for continuous listening (default: "hello")
-- `--whisper-model`: Specify Whisper model to use (default: "base.en", options: "tiny", "base", "small", "medium", "large", "base.en", "small.en")
-- `--play-voice`: Play generated audio responses through speakers
-- `--record-voice`: Record audio responses to a file instead of playing them
-
-
-### Tips for Best Results
-
-1. **Voice Cloning**:
-   - Use a clear 10-30 second audio sample
-   - Ensure the sample has minimal background noise
-   - The voice should speak naturally in the sample
-
-2. **Emotion Control**:
-   - For general conversation: `exaggeration=0.5, cfg_weight=0.5`
-   - For dramatic/expressive speech: `exaggeration=0.7+, cfg_weight=0.3`
-   - For calm/professional tone: `exaggeration=0.3, cfg_weight=0.7`
-
-3. **Performance**:
-   - Use CUDA if available for faster inference
-   - The first generation might be slower due to model loading
-   - Consider using smaller Whisper models ("tiny.en" or "base.en") for faster transcription
-
-### Scaling to Production
-
-For those aiming to elevate this application to a production-ready status, consider:
-
-- **Performance Optimization**:
-  - Use optimized inference engines (ONNX, TensorRT)
-  - Implement model quantization for faster inference
-  - Add caching for frequently used phrases
-
-- **Enhanced Features**:
-  - Multi-speaker support with voice profiles
-  - Real-time voice conversion
-  - Integration with more LLM providers
-  - Web interface with real-time streaming
-
-- **Voice Database**:
-  - Create a library of voice samples
-  - Implement voice selection UI
-  - Add voice mixing capabilities
-
-- **API Service**:
-  - RESTful API for TTS requests
-  - WebSocket support for real-time communication
-  - Rate limiting and authentication
-
-### Troubleshooting
-
-- **CUDA out of memory**: Use CPU mode or reduce model precision
-- **Microphone not working**: Check system permissions and device settings
-- **Slow inference**: Ensure you're using GPU if available, consider using smaller models
-- **Voice cloning quality**: Use higher quality audio samples with clear speech
-
-### Conclusion
-
-With the integration of ChatterBox, we've significantly enhanced our local voice assistant. The addition of voice cloning and emotion control opens up new possibilities for creating personalized and expressive AI assistants. Whether you're building a personal Jarvis, creating content, or developing voice-enabled applications, this updated stack provides a powerful foundation.
-
-The combination of Whisper's robust speech recognition, Ollama's flexible LLM serving, and ChatterBox's advanced TTS capabilities creates a fully-featured voice assistant that runs entirely offline. No cloud services, no API keys, just pure local AI power!
-
-### Resources
-
-- [ChatterBox GitHub](https://github.com/resemble-ai/chatterbox)
-- [Ollama](https://ollama.ai)
-- [Whisper](https://github.com/openai/whisper)
-- [Original Blog Post](https://blog.duy-huynh.com/build-your-own-voice-assistant-and-run-it-locally/)
-
----
+The recorder captures other people only with appropriate notice and consent.
+Use `python -m meeting_mvp delete ID --audio-only` to remove WAV files while
+keeping the transcript and minutes. Use `python -m meeting_mvp delete ID --all
+--confirm` to remove the complete meeting.
