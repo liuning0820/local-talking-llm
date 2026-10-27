@@ -147,6 +147,32 @@ History and `show` do not require Whisper, Ollama, or TTS to be available.
 `start` itself requires a usable input device; final processing requires the
 configured ASR and LLM backends.
 
+## Web UI
+
+The Streamlit page runs the same workflow as three separate steps:
+
+```bash
+python -m meeting_mvp ui            # http://127.0.0.1:8501
+python -m meeting_mvp ui --port 8600
+```
+
+1. **Record**: pick microphone or system audio (loopback), choose a device
+   (WASAPI devices only by default), then start and stop recording.
+2. **ASR**: choose local Whisper (lists all models and marks the downloaded
+   ones), or an OpenAI-compatible ASR address. Models are detected from
+   `<address>/models`, and you can type one in manually if detection fails.
+3. **LLM**: choose Ollama or an OpenAI-compatible server and enter its
+   address. Models are detected from `/api/tags` or `/v1/models`. Generate or
+   regenerate the minutes, then download Markdown or JSON.
+
+Each step can be re-run with different settings. For example, you can
+re-transcribe every chunk with another ASR model, or regenerate the minutes
+with another LLM; summaries are kept as numbered versions. Settings chosen on
+the page apply to that run only and are not written back to `.env`. The page
+uses the same data directory, network policy (`MEETING_ALLOW_NETWORK`), and
+remote-upload confirmation as the CLI. It has no login, so `ui` binds to
+`127.0.0.1` only.
+
 ## Select audio devices
 
 The `devices` command prints a stable ID, name, host API, channel count,

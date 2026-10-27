@@ -29,7 +29,8 @@ _STATUS_TRANSITIONS = {
     "partial": {"partial", "transcribing", "summarizing", "completed", "failed", "deleting"},
     "transcribing": {"transcribing", "summarizing", "partial", "failed"},
     "summarizing": {"summarizing", "completed", "partial", "failed"},
-    "completed": {"completed", "deleting"},
+    # A completed meeting can be re-transcribed or re-summarized (e.g. with another model).
+    "completed": {"completed", "transcribing", "summarizing", "deleting"},
     "failed": {"failed", "transcribing", "summarizing", "partial", "deleting"},
     "deleting": {"deleting"},
 }
@@ -477,6 +478,35 @@ class Store:
                 (now, meeting_id),
             )
             return cur.rowcount
+
+    def requeue_jobs(self, meeting_id: str, kind: str, include_completed: bool = False) -> int:
+        """Requeue one job kind for a meeting; refuses while a live lease is held."""
+        if kind not in {"transcribe", "summarize"}:
+            raise MeetingError("Invalid job kind", "INVALID_JOB_KIND")
+        now = utc_now()
+        statuses = ("failed", "running", "completed") if include_completed else ("failed", "running")
+        marks = ",".join("?" for _ in statuses)
+        with self._lock, self.db:
+            active = self.db.execute(
+                "SELECT lease_until FROM processing_jobs "
+                "WHERE meeting_id=? AND kind=? AND status='running' AND lease_until >= ? LIMIT 1",
+                (meeting_id, kind, now),
+            ).fetchone()
+            if active:
+                raise MeetingError(
+                    f"{kind} job is active until {active['lease_until']}; wait for it to finish",
+                    "JOB_ACTIVE",
+                )
+            cur = self.db.execute(
+                f"UPDATE processing_jobs SET status='queued',lease_until=NULL,error=NULL,updated_at=? "
+                f"WHERE meeting_id=? AND kind=? AND status IN ({marks})",
+                (now, meeting_id, kind, *statuses),
+            )
+            return cur.rowcount
+
+    def delete_transcripts(self, meeting_id: str) -> None:
+        with self._lock, self.db:
+            self.db.execute("DELETE FROM transcript_segments WHERE meeting_id=?", (meeting_id,))
 
     def save_summary(
         self, meeting_id: str, payload: dict[str, Any], markdown: str | None,

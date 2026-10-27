@@ -10,6 +10,7 @@ import queue
 import threading
 import time
 import wave
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -36,6 +37,30 @@ class DeviceInfo:
 
     def as_dict(self) -> dict[str, object]:
         return self.__dict__.copy()
+
+
+@contextmanager
+def _com_initialized() -> Iterator[None]:
+    """Initialize COM on the current thread for WASAPI.
+
+    PortAudio's WASAPI backend and SoundCard fail to start streams on threads that
+    never initialized COM (e.g. Streamlit's script thread or a recording worker);
+    the main thread of the CLI is already initialized, which hid this.
+    """
+    if platform.system() != "Windows":
+        yield
+        return
+    import ctypes
+    ole32 = ctypes.windll.ole32
+    ole32.CoInitializeEx.restype = ctypes.c_long
+    # S_OK / S_FALSE need a matching CoUninitialize; RPC_E_CHANGED_MODE means the
+    # thread is already initialized in another mode, which is also usable.
+    hr = ole32.CoInitializeEx(None, 0x0)  # COINIT_MULTITHREADED
+    try:
+        yield
+    finally:
+        if hr in (0, 1):
+            ole32.CoUninitialize()
 
 
 def list_devices(source: str = "all") -> list[DeviceInfo]:
@@ -136,6 +161,10 @@ class SoundDeviceSource:
         return np.clip(values, -32768, 32767).astype(np.int16).tobytes()
 
     def frames(self, stop: threading.Event) -> Iterator[tuple[bytes, float]]:
+        with _com_initialized():
+            yield from self._frames(stop)
+
+    def _frames(self, stop: threading.Event) -> Iterator[tuple[bytes, float]]:
         try:
             import sounddevice as sd
         except ImportError as exc:
@@ -179,13 +208,14 @@ class SoundDeviceSource:
                 last_open_error = exc
                 continue
         detail = f" Last callback status: {self.last_status}." if self.last_status else ""
+        if last_open_error is not None:
+            detail += f" Last open error: {last_open_error}."
         if self.frames_received == 0:
             raise DeviceError(
-                f"'{self.device.name}' opened but produced no audio frames or bytes after trying "
+                f"'{self.device.name}' produced no audio frames or bytes after trying "
                 f"{self._formats()} using {self.device.host_api}.{detail} Check Windows microphone "
-                "permission, mute/routing, or run `python -m meeting_mvp devices` and test another "
-                "listed host API/device (WASAPI device 12 or WDM-KS device 29 may expose a "
-                "different native format).",
+                "permission, mute/routing, or run `python -m meeting_mvp devices` and test the "
+                "same microphone under another listed host API.",
                 "AUDIO_NO_FRAMES",
             ) from last_open_error
 
@@ -196,6 +226,10 @@ class WindowsLoopbackSource:
         self.dropped_blocks = 0
 
     def frames(self, stop: threading.Event) -> Iterator[tuple[bytes, float]]:
+        with _com_initialized():
+            yield from self._frames(stop)
+
+    def _frames(self, stop: threading.Event) -> Iterator[tuple[bytes, float]]:
         try:
             import numpy as np
             import soundcard as sc
@@ -205,7 +239,12 @@ class WindowsLoopbackSource:
         if speaker is None:
             raise DeviceError("Selected playback device disappeared; choose it again.", "AUDIO_DEVICE_GONE")
         try:
-            with speaker.recorder(samplerate=self.settings.sample_rate, channels=self.settings.channels) as recorder:
+            # SoundCard exposes loopback capture as a "microphone" bound to the speaker.
+            loopback = sc.get_microphone(id=str(speaker.id), include_loopback=True)
+        except Exception as exc:
+            raise DeviceError(f"No WASAPI loopback endpoint for '{speaker.name}': {exc}", "WINDOWS_LOOPBACK_UNAVAILABLE") from exc
+        try:
+            with loopback.recorder(samplerate=self.settings.sample_rate, channels=self.settings.channels) as recorder:
                 while not stop.is_set():
                     samples = recorder.record(numframes=max(1600, self.settings.sample_rate // 5))
                     if samples is not None and len(samples):

@@ -51,7 +51,31 @@ def parser() -> argparse.ArgumentParser:
     delete.add_argument("--confirm", action="store_true")
     check = sub.add_parser("self-check", help="run a no-hardware/no-model synthetic pipeline")
     check.add_argument("--synthetic", action="store_true")
+    ui = sub.add_parser("ui", help="open the step-by-step Streamlit web UI (localhost only)")
+    ui.add_argument("--port", type=int, default=8501)
     return root
+
+
+def run_ui(port: int) -> int:
+    import subprocess
+    from pathlib import Path
+
+    try:
+        import streamlit  # noqa: F401
+    except ImportError as exc:
+        raise MeetingError("Streamlit is not installed; run python -m pip install -r requirements.txt", "STREAMLIT_MISSING") from exc
+    app = Path(__file__).resolve().parent.parent / "meeting_ui.py"
+    # The UI has no authentication, so it only listens on the loopback interface.
+    command = [
+        sys.executable, "-m", "streamlit", "run", str(app),
+        "--server.address", "127.0.0.1", "--server.port", str(port),
+        "--browser.gatherUsageStats", "false",
+    ]
+    try:
+        # No stdin: Streamlit's interactive first-run prompts can never be answered implicitly.
+        return subprocess.call(command, stdin=subprocess.DEVNULL)
+    except KeyboardInterrupt:
+        return 0
 
 
 def _confirm_remote(
@@ -87,6 +111,8 @@ def _confirm_remote(
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "ui":
+        return run_ui(args.port)
     settings = Settings.from_env()
     if args.command == "devices":
         for device in list_devices(args.source):

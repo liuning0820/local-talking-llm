@@ -115,6 +115,50 @@ class MeetingMvpTests(unittest.TestCase):
         self.assertEqual(checked["summary"], ["第一点", "第二点"])
         self.assertEqual(checked["missing_information"], ["未提及"])
 
+    def test_summary_tolerates_model_metadata_and_inference_drift(self):
+        base = {
+            "summary": ["测试"], "topics": [], "decisions": [], "action_items": [],
+            "unresolved_questions": [], "missing_information": ["未提及"],
+        }
+        # Observed from DeepSeek-R1-Distill-Qwen-7B: string version, label-only inference object.
+        payload = validate_summary(
+            {**base, "metadata": {"source": "Transcript", "version": "1"},
+             "inferences": [{"labels": ["模型推断", "需确认"], "evidence_segment_ids": []}]},
+            set(),
+        )
+        self.assertEqual(payload["metadata"], {"source": "transcript", "version": 1})
+        self.assertEqual(payload["inferences"], ["未提及"])
+        payload = validate_summary(
+            {**base, "metadata": {"source": "transcript", "version": 1},
+             "inferences": ["可能是设备测试", {"text": "模型推断（需确认）：已标注"}]},
+            set(),
+        )
+        self.assertEqual(payload["inferences"], ["模型推断（需确认）：可能是设备测试", "模型推断（需确认）：已标注"])
+        with self.assertRaises(MeetingError):
+            validate_summary({**base, "metadata": {"source": "audio", "version": "x"}}, set())
+
+    def test_unbacked_model_facts_become_labelled_inferences(self):
+        segments = [{"id": "s1", "start_ms": 0, "end_ms": 1000, "text": "Hello，这是啥测试？"}]
+        raw = {
+            "metadata": {"source": "transcript", "version": 1}, "summary": ["测试"],
+            "decisions": [{"decision": "有依据", "evidence_segment_ids": ["s1"], "start_ms": 0, "end_ms": 500},
+                          {"decision": "证据越界", "evidence_segment_ids": ["other"], "start_ms": 0, "end_ms": 500}],
+            "action_items": ["安排相关人员进行测试分析"],
+            "inferences": ["参与者在询问测试的名称"],
+        }
+        payload, markdown, _hash = SummaryEngine(lambda _p, _u: raw).generate(segments)
+        self.assertEqual([item["decision"] for item in payload["decisions"]], ["有依据"])
+        self.assertEqual(payload["action_items"], ["未提及"])
+        self.assertEqual(payload["inferences"], [
+            "模型推断（需确认）：参与者在询问测试的名称",
+            "模型推断（需确认）：（转写中找不到依据的决策）证据越界",
+            "模型推断（需确认）：（转写中找不到依据的行动项）安排相关人员进行测试分析",
+        ])
+        self.assertIn("安排相关人员进行测试分析", markdown.split("## 模型推断（需确认）")[1])
+        # The validator itself stays strict for direct callers.
+        with self.assertRaises(MeetingError):
+            validate_summary(raw, segments)
+
     def test_summary_object_item_is_retained_for_explicit_validation(self):
         with self.assertRaisesRegex(MeetingError, "evidence"):
             validate_summary(

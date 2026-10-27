@@ -17,6 +17,7 @@ dependencies = [
     "setuptools>=80.9.0",
     "sounddevice>=0.5.2",
     "soundcard==0.4.5",
+    "streamlit>=1.66.1",
     "torchaudio>=2.6.0",
 ]
 

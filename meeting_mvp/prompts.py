@@ -1,15 +1,16 @@
 """Evidence-first prompts used by the local summary adapter."""
 
-PROMPT_VERSION = "meeting-summary-v3"
+PROMPT_VERSION = "meeting-summary-v5"
 SYSTEM_PROMPT = """You create a factual meeting record from only the supplied transcript.
 Return one JSON object and no Markdown. Never invent names, dates, decisions,
 topics, or actions. Use exact transcript segment IDs as evidence_segment_ids.
 A factual decision or action must include a non-empty evidence_segment_ids list,
 start_ms, and end_ms copied from the evidence. If the transcript does not state
 a fact, use the exact text 未提及. Owner and due_date must be 未提及 when absent.
-Every inference must contain both the labels 模型推断 and 需确认, and must not be
-presented as a decision or action. Include metadata: {source: transcript,
-version: 1}."""
+Each inference is a plain string that starts with "模型推断（需确认）：" followed by
+the inference itself, for example "模型推断（需确认）：这可能是一次设备测试"; it must
+not be presented as a decision or action. With no inference, use ["未提及"]. Include exactly this metadata, with version
+as a JSON number (not a string): "metadata": {"source": "transcript", "version": 1}."""
 
 
 def summary_prompt(transcript: str, purpose: str = "final") -> str:

@@ -43,12 +43,15 @@ def _start_lease_heartbeat(store: Store, job_id: int, lease_seconds: int = 600):
     return stop, thread
 
 
-def _process_transcription_jobs(store: Store, meeting_id: str, transcriber) -> None:
+def _process_transcription_jobs(store: Store, meeting_id: str, transcriber, on_chunk=None) -> None:
+    """Consume queued chunk jobs; ``on_chunk(sequence)`` reports progress before each chunk."""
     while True:
         job = store.claim_job(meeting_id, "transcribe")
         if not job:
             return
         sequence = job["chunk_sequence"]
+        if on_chunk is not None:
+            on_chunk(sequence)
         chunk = store.get_chunk(meeting_id, sequence)
         if not chunk or chunk["status"] != "closed":
             store.fail_job(job["id"], "Audio chunk is missing or not closed")
@@ -145,6 +148,14 @@ def process_meeting(store: Store, meeting_id: str, settings: Settings, transcrib
         summary = store.summary(meeting_id)
         return summary["payload"] if summary else {"status": "completed"}
 
+    return run_summary_job(store, meeting_id, settings, engine)
+
+
+def run_summary_job(store: Store, meeting_id: str, settings: Settings, engine=None) -> dict:
+    """Claim the queued summary job, generate minutes, and set the final meeting status."""
+    meeting = store.get_meeting(meeting_id)
+    if not meeting:
+        raise MeetingError("Meeting not found", "MEETING_NOT_FOUND")
     store.update_meeting(meeting_id, status="summarizing")
     claimed = store.claim_job(meeting_id, "summarize")
     if not claimed:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -111,6 +112,14 @@ class LlamaASRTranscriber:
         return parse_llama_response(payload)
 
 
+_ASR_TAG = re.compile(r"^\s*(?:language\s+[^<\s]+\s*)?<asr_text>\s*", re.I)
+
+
+def _clean_asr_text(text: str) -> str:
+    """Drop Qwen3-ASR's ``language X<asr_text>`` prefix from returned text."""
+    return _ASR_TAG.sub("", text).strip()
+
+
 def parse_llama_response(payload: Any) -> str | list[dict[str, Any]]:
     """Normalize llama-server's JSON transcription response."""
     if not isinstance(payload, dict):
@@ -124,7 +133,7 @@ def parse_llama_response(payload: Any) -> str | list[dict[str, Any]]:
         for item in segments:
             if not isinstance(item, dict):
                 continue
-            text = str(item.get("text") or "").strip()
+            text = _clean_asr_text(str(item.get("text") or ""))
             if not text:
                 continue
             try:
@@ -136,8 +145,8 @@ def parse_llama_response(payload: Any) -> str | list[dict[str, Any]]:
         if normalized:
             return normalized
     text = payload.get("text")
-    if isinstance(text, str) and text.strip():
-        return text.strip()
+    if isinstance(text, str) and _clean_asr_text(text):
+        return _clean_asr_text(text)
     raise RecoverableJobError(
         "ASR returned HTTP 200 without usable text or segments",
         "ASR_EMPTY_RESPONSE",

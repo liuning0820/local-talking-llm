@@ -54,8 +54,35 @@ def _normalize_list_fields(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+INFERENCE_LABEL = "模型推断（需确认）"
+_INFERENCE_TEXT_KEYS = ("text", "inference", "content", "statement", "description", "value")
+
+
+def _normalize_inferences(items: list[Any]) -> list[Any]:
+    """Keep inference content, drop empty shells, and guarantee both labels on each item.
+
+    Small models often return ``{"labels": ["模型推断", "需确认"]}`` without any text, or
+    plain text without labels. Inferences are only ever rendered under the
+    "模型推断（需确认）" heading, so adding the label keeps them clearly unconfirmed.
+    """
+    result: list[Any] = []
+    for item in items:
+        if isinstance(item, dict):
+            text = next((item[key] for key in _INFERENCE_TEXT_KEYS if isinstance(item.get(key), str) and item[key].strip()), "")
+        else:
+            text = "" if item is None else str(item)
+        text = text.strip()
+        if not text or text == "未提及":
+            continue
+        if "模型推断" not in text or "需确认" not in text:
+            text = f"{INFERENCE_LABEL}：{text}"
+        result.append(text)
+    return result or ["未提及"]
+
+
 def _defaults(payload: dict[str, Any]) -> dict[str, Any]:
     result = _normalize_list_fields(payload)
+    result["inferences"] = _normalize_inferences(result["inferences"])
     if not result.get("summary"):
         result["summary"] = ["未提及"]
     for key in LIST_FIELDS[1:]:
@@ -65,9 +92,26 @@ def _defaults(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         result["metadata"] = {"source": "transcript", "version": 1}
     else:
-        result["metadata"] = dict(metadata)
-        result["metadata"].setdefault("source", "transcript")
-        result["metadata"].setdefault("version", 1)
+        result["metadata"] = _normalize_metadata(metadata)
+    return result
+
+
+def _normalize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Absorb harmless model drift such as "version": "1" or "Transcript".
+
+    Values that cannot be coerced are left as-is so validation still rejects them.
+    """
+    result = dict(metadata)
+    result.setdefault("source", "transcript")
+    result.setdefault("version", 1)
+    source = result["source"]
+    if isinstance(source, str):
+        result["source"] = source.strip().lower()
+    version = result["version"]
+    if isinstance(version, float) and version.is_integer():
+        result["version"] = int(version)
+    elif isinstance(version, str) and version.strip().lstrip("vV").isdigit():
+        result["version"] = int(version.strip().lstrip("vV"))
     return result
 
 
@@ -163,6 +207,44 @@ def validate_summary(payload: dict[str, Any], segment_ids: set[str] | list[dict[
     return payload
 
 
+def demote_unbacked_facts(payload: dict[str, Any], segments: list[dict[str, Any]]) -> dict[str, Any]:
+    """Move decisions/actions without valid transcript evidence into labelled inferences.
+
+    A model claim that cannot be traced to a segment is never shown as a decision or
+    action; it is kept under "模型推断（需确认）" instead of failing the whole summary.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    result = dict(payload)
+    known = {str(item["id"]) for item in segments}
+    ranges = {str(item["id"]): (int(item["start_ms"]), int(item["end_ms"])) for item in segments}
+    demoted: list[str] = []
+    for collection, field, label in (("decisions", "decision", "决策"), ("action_items", "action", "行动项")):
+        value = result.get(collection)
+        items = value if isinstance(value, list) else ([] if value is None else [value])
+        kept: list[Any] = []
+        for item in items:
+            if item == "未提及":
+                kept.append(item)
+                continue
+            text = str((item.get(field) if isinstance(item, dict) else item) or "").strip()
+            if isinstance(item, dict) and text and text != "未提及":
+                try:
+                    _valid_evidence(item, known, ranges)
+                    kept.append(item)
+                    continue
+                except MeetingError:
+                    pass
+            if text and text != "未提及":
+                demoted.append(f"{INFERENCE_LABEL}：（转写中找不到依据的{label}）{text}")
+        result[collection] = kept or ["未提及"]
+    if demoted:
+        existing = result.get("inferences")
+        existing = existing if isinstance(existing, list) else ([] if existing is None else [existing])
+        result["inferences"] = [item for item in existing if item != "未提及"] + demoted
+    return result
+
+
 class SummaryEngine:
     def __init__(self, summarizer: Callable[[str, str], dict[str, Any]], model: str = "local"):
         self.summarizer, self.model = summarizer, model
@@ -191,7 +273,7 @@ class SummaryEngine:
             reduce_windows = _windows_from_lines(map_lines, REDUCE_LIMIT)
             reduced = "\n--- MAP WINDOW ---\n".join(reduce_windows)
             raw = self._call(summary_prompt(reduced, "reduce"), "reduce")
-        payload = validate_summary(raw, segments)
+        payload = validate_summary(demote_unbacked_facts(raw, segments), segments)
         return payload, render_summary(payload), source_hash
 
 
